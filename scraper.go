@@ -189,10 +189,14 @@ func scrapeBlock(ctx context.Context, chainId uint64, client *ethclient.Client, 
 	blockHeader := block.Header()
 	mainBlockMiner := getMiner(ctx, chainId, client, blockHeader)
 	var blockReceipts []*types.Receipt
-	retryUntilSuccessOrContextDone(ctx, func(ctx context.Context) error {
-		blockReceipts, err = client.BlockReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber)))
-		return err
-	}, "BlockReceipts")
+	for _, tx := range block.Transactions() {
+		receipt, err := client.TransactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			log.Printf("Failed to fetch receipt for tx %s: %v", tx.Hash().Hex(), err)
+			continue
+		}
+		blockReceipts = append(blockReceipts, receipt)
+	}
 	rewardsByMiner := make(map[common.Address]*big.Int)
 	rewardsByUncleBlock := make(map[common.Hash]*big.Int)
 	if !*isPoaChain && blockNumber != 0 {
