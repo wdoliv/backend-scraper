@@ -12,13 +12,18 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+// Assumindo que retryUntilSuccessOrContextDone tem assinatura parecida com:
+// func retryUntilSuccessOrContextDone(ctx context.Context, f func(context.Context) error, desc string)
+
 func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Client, block *types.Block, blockReceipts []*types.Receipt) (map[common.Address]*big.Int, map[common.Hash]*big.Int) {
 	var result []map[string]any
 	blockHeader := block.Header()
-	err := retryUntilSuccessOrContextDone(ctx, func(ctx context.Context) error {
+
+	// Chama retry sem atribuir retorno, trata erro dentro do callback
+	retryUntilSuccessOrContextDone(ctx, func(ctx context.Context) error {
 		err := client.Client().CallContext(ctx, &result, "trace_block", fmt.Sprintf("0x%x", blockHeader.Number.Uint64()))
 		if err != nil {
-			// Se o método trace_block não existe, apenas loga e retorna nil para não falhar
+			// Se o método trace_block não existe, loga e retorna nil para continuar
 			if strings.Contains(err.Error(), "trace_block") && strings.Contains(err.Error(), "does not exist") {
 				log.Printf("trace_block não disponível no nó RPC, ignorando recompensas por trace_block")
 				return nil
@@ -28,9 +33,9 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 		return nil
 	}, "trace_block")
 
-	if err != nil {
-		log.Printf("Erro na chamada trace_block: %v", err)
-		// Continua com mapas vazios para evitar falha geral
+	// Se não obteve resultado, retorna mapas vazios
+	if len(result) == 0 {
+		log.Printf("Nenhum resultado de trace_block obtido ou método indisponível")
 		return make(map[common.Address]*big.Int), make(map[common.Hash]*big.Int)
 	}
 
