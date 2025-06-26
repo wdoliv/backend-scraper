@@ -16,22 +16,22 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 	var result []map[string]any
 	blockHeader := block.Header()
 
-	// Executa a chamada trace_block com tratamento de erro e fallback
+	// Executa a chamada com retry, tratando o erro dentro do callback
 	retryUntilSuccessOrContextDone(ctx, func(ctx context.Context) error {
 		err := client.Client().CallContext(ctx, &result, "trace_block", fmt.Sprintf("0x%x", blockHeader.Number.Uint64()))
 		if err != nil {
 			if strings.Contains(err.Error(), "trace_block") && strings.Contains(err.Error(), "does not exist") {
-				log.Printf("trace_block não disponível no nó RPC, ignorando recompensas por trace_block")
-				// Não retorna erro para continuar o processamento com mapas vazios
-				result = nil
-				return nil
+				log.Printf("⚠️ trace_block não está disponível no RPC — recompensas ignoradas")
+				result = nil // seta resultado como nulo
+				return nil   // não falha o retry
 			}
-			return err
+			log.Printf("Erro no trace_block: %v", err)
+			return err // repete o retry
 		}
 		return nil
 	}, "trace_block")
 
-	// Se não houver resultado, retorna mapas vazios
+	// Se resultado for nil (ex: trace_block indisponível), retorna mapas vazios
 	if result == nil {
 		return make(map[common.Address]*big.Int), make(map[common.Hash]*big.Int)
 	}
@@ -39,7 +39,6 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 	rewardsByMiner := make(map[common.Address]*big.Int)
 	rewardsByUncleBlock := make(map[common.Hash]*big.Int)
 	uncleHeaders := make(map[*types.Header]struct{})
-
 	for _, uncle := range block.Uncles() {
 		uncleHeaders[uncle] = struct{}{}
 	}
@@ -50,18 +49,16 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 		if !isRewardAction {
 			continue
 		}
-
 		author := common.HexToAddress(action["author"].(string))
 		reward, success := new(big.Int).SetString(action["value"].(string), 0)
 		if !success {
-			panic("programming error: não foi possível converter o valor da recompensa para *big.Int")
+			panic("programming error: reward inválido")
 		}
-
 		switch rewardType {
 		case "block":
 			miner := getMiner(ctx, chainId, client, blockHeader)
 			if miner != author {
-				panic("programming error: minerador do bloco diferente do autor da recompensa")
+				panic("programming error: miner != author")
 			}
 			if rewardsByMiner[miner] == nil {
 				rewardsByMiner[miner] = new(big.Int)
@@ -80,9 +77,8 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 					break
 				}
 			}
-
 		default:
-			panic("programming error: tipo de recompensa inesperado")
+			panic("programming error: rewardType desconhecido")
 		}
 	}
 
