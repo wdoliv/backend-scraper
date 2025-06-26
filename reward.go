@@ -12,20 +12,18 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// Assumindo que retryUntilSuccessOrContextDone tem assinatura parecida com:
-// func retryUntilSuccessOrContextDone(ctx context.Context, f func(context.Context) error, desc string)
-
 func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Client, block *types.Block, blockReceipts []*types.Receipt) (map[common.Address]*big.Int, map[common.Hash]*big.Int) {
 	var result []map[string]any
 	blockHeader := block.Header()
 
-	// Chama retry sem atribuir retorno, trata erro dentro do callback
+	// Executa a chamada trace_block com tratamento de erro e fallback
 	retryUntilSuccessOrContextDone(ctx, func(ctx context.Context) error {
 		err := client.Client().CallContext(ctx, &result, "trace_block", fmt.Sprintf("0x%x", blockHeader.Number.Uint64()))
 		if err != nil {
-			// Se o método trace_block não existe, loga e retorna nil para continuar
 			if strings.Contains(err.Error(), "trace_block") && strings.Contains(err.Error(), "does not exist") {
 				log.Printf("trace_block não disponível no nó RPC, ignorando recompensas por trace_block")
+				// Não retorna erro para continuar o processamento com mapas vazios
+				result = nil
 				return nil
 			}
 			return err
@@ -33,39 +31,43 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 		return nil
 	}, "trace_block")
 
-	// Se não obteve resultado, retorna mapas vazios
-	if len(result) == 0 {
-		log.Printf("Nenhum resultado de trace_block obtido ou método indisponível")
+	// Se não houver resultado, retorna mapas vazios
+	if result == nil {
 		return make(map[common.Address]*big.Int), make(map[common.Hash]*big.Int)
 	}
 
 	rewardsByMiner := make(map[common.Address]*big.Int)
 	rewardsByUncleBlock := make(map[common.Hash]*big.Int)
 	uncleHeaders := make(map[*types.Header]struct{})
+
 	for _, uncle := range block.Uncles() {
 		uncleHeaders[uncle] = struct{}{}
 	}
+
 	for _, data := range result {
 		action := data["action"].(map[string]any)
 		rewardType, isRewardAction := action["rewardType"]
 		if !isRewardAction {
 			continue
 		}
+
 		author := common.HexToAddress(action["author"].(string))
 		reward, success := new(big.Int).SetString(action["value"].(string), 0)
 		if !success {
-			panic("programming error")
+			panic("programming error: não foi possível converter o valor da recompensa para *big.Int")
 		}
+
 		switch rewardType {
 		case "block":
 			miner := getMiner(ctx, chainId, client, blockHeader)
 			if miner != author {
-				panic("programming error")
+				panic("programming error: minerador do bloco diferente do autor da recompensa")
 			}
 			if rewardsByMiner[miner] == nil {
 				rewardsByMiner[miner] = new(big.Int)
 			}
 			rewardsByMiner[miner].Add(rewardsByMiner[miner], reward)
+
 		case "uncle":
 			for uncle := range uncleHeaders {
 				if getMiner(ctx, chainId, client, uncle) == author {
@@ -78,9 +80,11 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 					break
 				}
 			}
+
 		default:
-			panic("programming error")
+			panic("programming error: tipo de recompensa inesperado")
 		}
 	}
+
 	return rewardsByMiner, rewardsByUncleBlock
 }
