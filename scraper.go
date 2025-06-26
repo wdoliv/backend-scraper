@@ -18,7 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 func startScraper(ctx context.Context, client *ethclient.Client) {
@@ -131,13 +130,15 @@ func startScraper(ctx context.Context, client *ethclient.Client) {
 			}
 
 			// Delete all orphan blocks and their references from the database.
-			retryUntilSuccessOrContextDone(ctx, func(context.Context) error {
-				err := repo.DeleteBlockAndAllReferences(blockNumbersToDelete...)
-				if err != nil {
-					return err
-				}
-				return repo.Commit(ctx)
-			}, "DeleteBlockAndAllBlockIdReferences")
+			if len(blockNumbersToDelete) > 0 {
+				retryUntilSuccessOrContextDone(ctx, func(context.Context) error {
+					err := repo.DeleteBlockAndAllReferences(blockNumbersToDelete...)
+					if err != nil {
+						return err
+					}
+					return repo.Commit(ctx)
+				}, "DeleteBlockAndAllBlockIdReferences")
+			}
 
 			// Complete the reorganization handling by storing the reorganized blocks in the database.
 			for i := len(reorganizedRpcBlocks) - 1; i >= 0; i-- {
