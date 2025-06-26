@@ -30,8 +30,7 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 
 	if err != nil {
 		log.Printf("Erro na chamada trace_block: %v", err)
-		// Decide aqui se quer continuar (retornando mapas vazios) ou abortar com panic/return nil
-		// Vou optar por continuar com mapas vazios:
+		// Continua com mapas vazios para evitar falha geral
 		return make(map[common.Address]*big.Int), make(map[common.Hash]*big.Int)
 	}
 
