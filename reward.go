@@ -16,22 +16,20 @@ func getBlockRewards(ctx context.Context, chainId uint64, client *ethclient.Clie
 	var result []map[string]any
 	blockHeader := block.Header()
 
-	// Executa a chamada com retry, tratando o erro dentro do callback
 	retryUntilSuccessOrContextDone(ctx, func(ctx context.Context) error {
 		err := client.Client().CallContext(ctx, &result, "trace_block", fmt.Sprintf("0x%x", blockHeader.Number.Uint64()))
 		if err != nil {
 			if strings.Contains(err.Error(), "trace_block") && strings.Contains(err.Error(), "does not exist") {
 				log.Printf("⚠️ trace_block não está disponível no RPC — recompensas ignoradas")
-				result = nil // seta resultado como nulo
-				return nil   // não falha o retry
+				result = nil
+				return nil
 			}
 			log.Printf("Erro no trace_block: %v", err)
-			return err // repete o retry
+			return err
 		}
 		return nil
 	}, "trace_block")
 
-	// Se resultado for nil (ex: trace_block indisponível), retorna mapas vazios
 	if result == nil {
 		return make(map[common.Address]*big.Int), make(map[common.Hash]*big.Int)
 	}
